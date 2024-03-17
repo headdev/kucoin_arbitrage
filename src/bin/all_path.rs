@@ -3,8 +3,11 @@ use interning::{InternedString, InternedStringHash};
 use kucoin_api::client::{Kucoin, KucoinEnv};
 use kucoin_api::model::market::SymbolList;
 use kucoin_arbitrage::system_event::task_signal_handle;
+use ordered_float::OrderedFloat;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
+use std::hash::{Hash, Hasher};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -218,6 +221,80 @@ impl CycleFinder {
     }
 }
 
+#[derive(Default)]
+struct Global{
+    trade_action:TradeActionArchetype,
+    cycle:CycleArchetype,
+    pair:PairArchetype,
+    
+}
+// TODO archetype fields can be a macro thing
+#[derive(Debug, Default)]
+pub struct TradeActionArchetype {
+    hasher: DefaultHasher,
+    price_map: HashMap<u64, f64>,
+}
+impl TradeActionArchetype {
+    pub fn price_by_id(&mut self, id: u64) -> &mut f64 {
+        self.price_map.entry(id).or_default()
+    }
+    pub fn price(&mut self, item: &TradeAction) -> &mut f64 {
+        item.hash(&mut self.hasher);
+        let id = self.hasher.finish();
+        self.price_map.entry(id).or_default()
+    }
+}
+
+// TODO archetype fields can be a macro thing
+#[derive(Default)]
+pub struct CycleArchetype {
+    global: std::sync::Arc<Global>,
+    hasher: DefaultHasher,
+    actions_map: HashMap<u64, Vec<u64>>,
+}
+impl CycleArchetype {
+    pub fn actions_by_id(&mut self, id: u64) -> &mut Vec<u64> {
+        self.actions_map.entry(id).or_default()
+    }
+    pub fn actions(&mut self, item: &TradeCycle) -> &mut Vec<u64> {
+        item.hash(&mut self.hasher);
+        let id = self.hasher.finish();
+        self.actions_by_id(id)
+    }
+    pub fn profit(&mut self, item: &TradeCycle, mut arch: TradeActionArchetype) -> f64 {
+        let get_price = |x:&mut u64|{OrderedFloat(*self.global.trade_action.price_by_id(*x))};
+        let mut profits: Vec<OrderedFloat<f64>> = self
+            .actions(item)
+            .into_iter()
+            .map(get_price)
+            .collect();
+        profits.sort();
+        let profit = *profits.first().unwrap();
+        profit.into()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PairArchetype {
+    hasher: DefaultHasher,
+    cycles_map: HashMap<u64, Vec<TradeCycle>>,
+}
+impl PairArchetype {
+    pub fn cycles_by_id(&mut self, id: u64) -> &mut Vec<TradeCycle> {
+        self.cycles_map.entry(id).or_default()
+    }
+    pub fn cycles(&mut self, pair: &Pair) -> &mut Vec<TradeCycle> {
+        pair.hash(&mut self.hasher);
+        let id = self.hasher.finish();
+        self.cycles_by_id(id)
+    }
+    pub fn highest_profit(&mut self, pair: &Pair) -> &mut Vec<TradeCycle> {
+        pair.hash(&mut self.hasher);
+        let id = self.hasher.finish();
+        self.cycles_by_id(id)
+    }
+}
+
 async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let _worker_guard = kucoin_arbitrage::logger::setup_logs(&config.log)?;
     // kucoin api endpoints
@@ -240,7 +317,7 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     // 6 seconds to find cycles len <= 4 (62K cycles)
     // 30 seconds to find cycles len <= 5 (222K cycles)
     // 140 seconds to find cycles len <= 6 (3690K cycles)
-    let length_limit = 4;
+    let length_limit = 3;
     let mut finder = CycleFinder::new(Some(length_limit));
     let found_cycles: Vec<TradeCycle> = finder.find_cycles(pairs, start_node);
     // filter
@@ -250,11 +327,11 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     tracing::info!("{} cycles found", found_cycles.len());
     let dt_found_cycles = chrono::Utc::now();
 
-    // TODO currently it is directly storing the cycles into hashmap, which might be too space expensive
-    let mut pair_to_cycle = HashMap::<Pair, Vec<TradeCycle>>::new();
+    // pair archetype store the cycles
+    let mut pair_archetype = PairArchetype::default();
     for found_cycle in found_cycles {
         for pair in found_cycle.get_all_pairs() {
-            let cycles = pair_to_cycle.entry(pair).or_default();
+            let cycles = pair_archetype.cycles(&pair);
             cycles.push(found_cycle.clone());
         }
     }
@@ -264,15 +341,23 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let usd = InternedString::from_str("USDT").hash().hash();
     let new_pair = Pair::new(btc, usd);
     // these should be the cycles containing BTC_USDT
-    let cycles = pair_to_cycle.entry(new_pair).or_default();
+    let cycles = pair_archetype.cycles(&new_pair);
+
+    // assign arbitrary values to update the price
+    let mut action_archetype = TradeActionArchetype::default();
+    let mut counter = 0;
     for cycle in cycles {
-        tracing::info!("{cycle}");
+        for action in &cycle.actions {
+            let price = action_archetype.price(action);
+            *price = f64::from(counter);
+            counter += 1;
+        }
     }
     let dt_found_mapped_cycles = chrono::Utc::now();
 
-    dbg!(dt_found_cycles-dt_found_pairs); //750ms
-    dbg!(dt_mapped_cycles-dt_found_cycles);//2ms
-    dbg!(dt_found_mapped_cycles-dt_mapped_cycles);//4us without print
+    dbg!(dt_found_cycles - dt_found_pairs); //750ms
+    dbg!(dt_mapped_cycles - dt_found_cycles); //2ms
+    dbg!(dt_found_mapped_cycles - dt_mapped_cycles); //4us without print
     Ok(())
 }
 
