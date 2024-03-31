@@ -1,6 +1,6 @@
 use crate::event::{chance::ChanceEvent, orderbook::OrderbookEvent};
 use crate::model::chance::{ActionInfo, TriangularArbitrageChance};
-use crate::model::orderbook::{FullOrderbook, Orderbook};
+use crate::model::orderbook::{FullL2Orderbook, L2Orderbook};
 use crate::model::symbol::SymbolInfo;
 use crate::strings::split_symbol;
 use eyre::Result;
@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 pub async fn task_pub_chance_all_taker_btc_usd(
     mut receiver: Receiver<OrderbookEvent>,
     sender: Sender<ChanceEvent>,
-    local_full_orderbook: Arc<Mutex<FullOrderbook>>,
+    local_full_orderbook: Arc<Mutex<FullL2Orderbook>>,
     symbol_map: Arc<Mutex<BTreeMap<String, SymbolInfo>>>,
     usd_budget: f64,
 ) -> Result<()> {
@@ -95,9 +95,9 @@ fn triangular_chance_sequence(
     info_btc_usd: SymbolInfo,
     info_alt_btc: SymbolInfo,
     info_alt_usd: SymbolInfo,
-    orderbook_btc_usd: &Orderbook,
-    orderbook_alt_btc: &Orderbook,
-    orderbook_alt_usd: &Orderbook,
+    orderbook_btc_usd: &L2Orderbook,
+    orderbook_alt_btc: &L2Orderbook,
+    orderbook_alt_usd: &L2Orderbook,
     usd_amount: f64,
 ) -> Option<TriangularArbitrageChance> {
     // tracing::info!("TSC: {}", info_alt_btc.base);

@@ -13,7 +13,7 @@ use kucoin_arbitrage::broker::trade::kucoin::task_pub_trade_event;
 use kucoin_arbitrage::event::{
     chance::ChanceEvent, order::OrderEvent, orderbook::OrderbookEvent, trade::TradeEvent,
 };
-use kucoin_arbitrage::model::orderbook::FullOrderbook;
+use kucoin_arbitrage::model::orderbook::FullL2Orderbook;
 use kucoin_arbitrage::monitor::counter::Counter;
 use kucoin_arbitrage::monitor::task::{task_log_mps, task_monitor_channel_mps};
 use kucoin_arbitrage::strategy::all_taker_btc_usd::task_pub_chance_all_taker_btc_usd;
@@ -80,7 +80,7 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     tracing::info!("Broadcast channels setup");
 
     // local orderbook
-    let full_orderbook = Arc::new(Mutex::new(FullOrderbook::new()));
+    let full_orderbook = Arc::new(Mutex::new(FullL2Orderbook::new()));
     tracing::info!("Local empty full orderbook setup");
 
     // infrastructure tasks

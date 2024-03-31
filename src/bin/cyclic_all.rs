@@ -2,6 +2,7 @@ use eyre::Result;
 use interning::{InternedString, InternedStringHash};
 use kucoin_api::client::{Kucoin, KucoinEnv};
 use kucoin_api::model::market::SymbolList;
+use kucoin_arbitrage::model::orderbook::L2Orderbook;
 use kucoin_arbitrage::system_event::task_signal_handle;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
@@ -132,6 +133,14 @@ impl TradeCycle {
         }
         return false;
     }
+    /// profit derived from orderbook data
+    pub fn profit(&self, orderbook: FullL2Orderbook) -> f64{
+        for action in &self.actions {
+            // TODO implement price look up with trade action
+            // get max profit   
+        }
+        0.0
+    }
 }
 impl Debug for TradeCycle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -247,6 +256,9 @@ pub fn pair_to_cycle(
     map
 }
 
+/// Pair as key, orderbook as value
+pub type FullL2Orderbook = HashMap<Pair, L2Orderbook>; //Symbols to Orderbook
+
 async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let _worker_guard = kucoin_arbitrage::logger::setup_logs(&config.log)?;
     // kucoin api endpoints
@@ -290,11 +302,18 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let usd = InternedString::from_str("USDT").hash().hash();
     let new_pair = Pair::new(btc, usd);
     // these should be the cycles containing BTC_USDT
-    let res = pair_to_cycle.entry(new_pair).or_default();
-    tracing::info!("res:{res:#?}");
+    let cycles_updated = pair_to_cycle.entry(new_pair).or_default();
+    tracing::info!("cycles_updated:{cycles_updated:#?}");
     let dt_found_mapped_cycles = chrono::Utc::now();
 
-    // TODO find highest profit
+    // TODO find highest profit (orderbook is a more generic item used across strategies)
+    // for finding profit, we should use strategy and take orderbook as parameter
+    // step 1, feed bid/ask price and volume per pair into the struct below
+    let orderbook = FullL2Orderbook::new();
+    // step 2, find the profit per updated trade cycle
+    for cycle_updated in cycles_updated.iter(){
+        cycle_updated
+    }
     
     // print each time
     dbg!((dt_found_cycles - dt_found_pairs).num_milliseconds()); //750ms

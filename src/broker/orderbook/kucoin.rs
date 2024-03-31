@@ -1,5 +1,5 @@
 use crate::event::orderbook::OrderbookEvent;
-use crate::model::orderbook::FullOrderbook;
+use crate::model::orderbook::FullL2Orderbook;
 use crate::model::symbol::SymbolInfo;
 use crate::translator::traits::{ToOrderBook, ToOrderBookChange};
 use chrono::{TimeZone, Utc};
@@ -107,7 +107,7 @@ pub async fn task_get_orderbook(api: Kucoin, symbol: &str) -> Result<OrderBook> 
 pub async fn task_get_initial_orderbooks(
     api: Kucoin,
     symbol_infos: Vec<SymbolInfo>,
-    full_orderbook: Arc<Mutex<FullOrderbook>>,
+    full_orderbook: Arc<Mutex<FullL2Orderbook>>,
 ) -> Result<()> {
     // replace spawn with or a taskpool
     let mut taskpool_aggregate = JoinSet::new();

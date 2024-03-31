@@ -12,7 +12,7 @@ use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
 impl traits::ToOrderBook for api_model::market::OrderBook {
-    fn to_internal(&self) -> model::orderbook::Orderbook {
+    fn to_internal(&self) -> model::orderbook::L2Orderbook {
         let parse_err_msg = "Failed to parse input";
         let sequence = self.sequence.parse::<u64>().unwrap();
         let mut ask = model::orderbook::PVMap::new();
@@ -28,13 +28,13 @@ impl traits::ToOrderBook for api_model::market::OrderBook {
             let volume: OrderedFloat<f64> = bid_pv[1].parse().expect(parse_err_msg);
             bid.insert(price, volume);
         }
-        model::orderbook::Orderbook { ask, bid, sequence }
+        model::orderbook::L2Orderbook { ask, bid, sequence }
     }
 }
 
 impl traits::ToOrderBookChange for api_model::websocket::Level2 {
     /// converts to (symbol, orderbook)
-    fn to_internal(&self, last_serial: u64) -> (String, model::orderbook::Orderbook) {
+    fn to_internal(&self, last_serial: u64) -> (String, model::orderbook::L2Orderbook) {
         // return Orderbook::new();
         let mut ask = model::orderbook::PVMap::new();
         let mut bid = model::orderbook::PVMap::new();
@@ -59,7 +59,7 @@ impl traits::ToOrderBookChange for api_model::websocket::Level2 {
         let sequence = self.sequence_end as u64;
         (
             self.symbol.clone(),
-            model::orderbook::Orderbook { ask, bid, sequence },
+            model::orderbook::L2Orderbook { ask, bid, sequence },
         )
     }
 }

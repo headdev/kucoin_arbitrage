@@ -20,13 +20,13 @@ impl<'a> std::fmt::Debug for PVMapDebug<'a> {
 
 /// orderbook for each symbol, contains ask, bid, time and sequence
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Orderbook {
+pub struct L2Orderbook {
     pub ask: PVMap,
     pub bid: PVMap,
     pub sequence: u64,
 }
 
-impl std::fmt::Debug for Orderbook {
+impl std::fmt::Debug for L2Orderbook {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Orderbook")
             .field("sequence", &self.sequence)
@@ -37,11 +37,11 @@ impl std::fmt::Debug for Orderbook {
 }
 
 /// symbol as key, orderbook as value
-pub type FullOrderbook = HashMap<String, Orderbook>; //Symbols to Orderbook
+pub type FullL2Orderbook = HashMap<String, L2Orderbook>; //Symbols to Orderbook
 
-impl Orderbook {
-    pub fn new() -> Orderbook {
-        Orderbook {
+impl L2Orderbook {
+    pub fn new() -> L2Orderbook {
+        L2Orderbook {
             ask: PVMap::new(),
             bid: PVMap::new(),
             sequence: 0,
@@ -49,7 +49,7 @@ impl Orderbook {
     }
 
     /// Merges another Orderbook, returns Orderbook when there is increase in the best price (i.e. lowest ask or highest bid)
-    pub fn merge(&mut self, to_merge: Orderbook) -> Result<Option<Orderbook>, String> {
+    pub fn merge(&mut self, to_merge: L2Orderbook) -> Result<Option<L2Orderbook>, String> {
         let to_merge_clone = to_merge.to_owned();
 
         // tracing::info!("to_merge: {to_merge_clone:?}");
