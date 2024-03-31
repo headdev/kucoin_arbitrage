@@ -23,6 +23,7 @@ use tokio::sync::broadcast::channel;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
+/// cyclic btc usdt is the triangular arbitrage for FOO, BTC, USDT.
 #[tokio::main]
 async fn main() -> Result<()> {
     // logging format

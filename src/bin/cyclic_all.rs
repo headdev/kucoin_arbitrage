@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 
+/// cyclic_all is the advanced version of btcusdt which trades on all the cyclic arbitrage of any size, any path.
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("exit upon terminating signal");
