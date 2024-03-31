@@ -294,6 +294,7 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     tracing::info!("res:{res:#?}");
     let dt_found_mapped_cycles = chrono::Utc::now();
 
+    // TODO find highest profit
     
     // print each time
     dbg!((dt_found_cycles - dt_found_pairs).num_milliseconds()); //750ms
