@@ -369,21 +369,31 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let new_pair = Pair::new(btc, usd);
     // these should be the cycles containing BTC_USDT
     let cycles_updated = pair_to_cycle.entry(new_pair).or_default();
-    tracing::info!("cycles_updated:{cycles_updated:#?}");
     let dt_found_mapped_cycles = chrono::Utc::now();
 
     // TODO find highest profit (orderbook is a more generic item used across strategies)
     // for finding profit, we should use strategy and take orderbook as parameter
     // step 1, feed bid/ask price and volume per pair into the struct below
     let collection = OrderbookCollection::new();
-    // TODO feed it
-    
+    // TODO refer to the original cyclic_btcusdt.rs for obtaining the original feed
+    // NOTE once we have the initial set up value, we should be able to find the change out of that collection dataset.
+
     // step 2, find the profit per updated trade cycle
     let mut max_profit = OrderedFloat::<f64>::from_f64(f64::MIN).expect("failed init");
+    let mut max_profit_cycle: Option<&TradeCycle> = None;
     for cycle_updated in cycles_updated.iter() {
         if let Some(profit) = profit_cyclic_arbitrage(cycle_updated, &collection) {
-            max_profit = max_profit.max(profit);
+            if profit > max_profit {
+                max_profit = profit;
+                max_profit_cycle = Some(cycle_updated);
+            }
         }
+    }
+    if let Some(max_profit_cycle) = max_profit_cycle {
+        tracing::info!("max profit: {max_profit}");
+        tracing::info!("max profit cycle: {max_profit_cycle:?}");
+    } else {
+        tracing::error!("no profit data, check both collection and the cycle_udpated");
     }
 
     // print each time
