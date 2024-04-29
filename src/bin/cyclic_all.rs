@@ -3,7 +3,10 @@ use interning::{InternedString, InternedStringHash};
 use kucoin_api::client::{Kucoin, KucoinEnv};
 use kucoin_api::model::market::SymbolList;
 use kucoin_arbitrage::model::orderbook::L2Orderbook;
+use kucoin_arbitrage::model::orderbook::PVMap;
 use kucoin_arbitrage::system_event::task_signal_handle;
+use num_traits::FromPrimitive;
+use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
@@ -61,6 +64,17 @@ pub enum Action {
     Sell,
 }
 
+impl Action {
+    /// get the reverse of the action
+    pub fn reverse(&self) -> Self {
+        let this = self.clone();
+        match this {
+            Action::Buy => Action::Sell,
+            Action::Sell => Action::Buy,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, PartialOrd, Eq, Ord)]
 pub struct TradeAction {
     pub pair: Pair,
@@ -76,6 +90,9 @@ impl Display for TradeAction {
         write!(f, "{:?}({})", self.action, self.pair)
     }
 }
+
+pub type Price = OrderedFloat<f64>;
+pub type Volume = OrderedFloat<f64>;
 impl TradeAction {
     pub fn buy(base: u64, quote: u64) -> Self {
         TradeAction {
@@ -89,7 +106,13 @@ impl TradeAction {
             action: Action::Sell,
         }
     }
+    pub fn reverse(&self) -> Self {
+        let mut this = self.clone();
+        this.action = this.action.reverse();
+        this
+    }
 }
+
 #[derive(Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
 pub struct TradeCycle {
     actions: Vec<TradeAction>,
@@ -132,14 +155,6 @@ impl TradeCycle {
             }
         }
         return false;
-    }
-    /// profit derived from orderbook data
-    pub fn profit(&self, orderbook: FullL2Orderbook) -> f64{
-        for action in &self.actions {
-            // TODO implement price look up with trade action
-            // get max profit   
-        }
-        0.0
     }
 }
 impl Debug for TradeCycle {
@@ -256,8 +271,59 @@ pub fn pair_to_cycle(
     map
 }
 
+// add a query feature for the type to query using trade_action
 /// Pair as key, orderbook as value
-pub type FullL2Orderbook = HashMap<Pair, L2Orderbook>; //Symbols to Orderbook
+// pub type FullL2Orderbook = HashMap<Pair, L2Orderbook>; //Symbols to Orderbook
+
+#[derive(Debug, Default)]
+pub struct OrderbookCollection {
+    pub map: HashMap<Pair, L2Orderbook>,
+}
+
+impl OrderbookCollection {
+    pub fn new() -> Self {
+        OrderbookCollection::default()
+    }
+    pub fn get_orderbook(&self, action: TradeAction) -> Option<&PVMap> {
+        let Some(l2) = self.map.get(&action.pair) else {
+            return None;
+        };
+        let orderbook = match action.action {
+            Action::Buy => &l2.bid,
+            Action::Sell => &l2.ask,
+        };
+        Some(orderbook)
+    }
+
+    pub fn get_best_price_volume(&self, action: TradeAction) -> Option<(&Price, &Volume)> {
+        let Some(orderbook) = self.get_orderbook(action) else {
+            return None;
+        };
+        // TODO double check here see if order was sorted by ascending price
+        match action.action {
+            Action::Buy => orderbook.last_key_value(),
+            Action::Sell => orderbook.first_key_value(),
+        }
+    }
+}
+
+// get the profit chance in multiples (1.2 for 20% profit), by assuming base currency volume is 1 unit
+fn profit_cyclic_arbitrage(cycle: &TradeCycle, collection: &OrderbookCollection) -> Option<Price> {
+    let mut value_per_currency: Price = Price::from_i8(1).unwrap();
+    for action in cycle.actions.iter() {
+        let Some((best_price, _)) = collection.get_best_price_volume(action.reverse()) else {
+            return None;
+        };
+        // buy: divide at best sell price
+        // sell: multiply by best buy price
+        // e.g. for case of ALT-USDT:2, with 1 USDT, you will have 0.5 ALT
+        match action.action {
+            Action::Buy => value_per_currency /= best_price,
+            Action::Sell => value_per_currency *= best_price,
+        }
+    }
+    Some(value_per_currency)
+}
 
 async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let _worker_guard = kucoin_arbitrage::logger::setup_logs(&config.log)?;
@@ -309,12 +375,17 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     // TODO find highest profit (orderbook is a more generic item used across strategies)
     // for finding profit, we should use strategy and take orderbook as parameter
     // step 1, feed bid/ask price and volume per pair into the struct below
-    let orderbook = FullL2Orderbook::new();
-    // step 2, find the profit per updated trade cycle
-    for cycle_updated in cycles_updated.iter(){
-        cycle_updated
-    }
+    let collection = OrderbookCollection::new();
+    // TODO feed it
     
+    // step 2, find the profit per updated trade cycle
+    let mut max_profit = OrderedFloat::<f64>::from_f64(f64::MIN).expect("failed init");
+    for cycle_updated in cycles_updated.iter() {
+        if let Some(profit) = profit_cyclic_arbitrage(cycle_updated, &collection) {
+            max_profit = max_profit.max(profit);
+        }
+    }
+
     // print each time
     dbg!((dt_found_cycles - dt_found_pairs).num_milliseconds()); //750ms
     dbg!((dt_mapped_cycles - dt_found_cycles).num_milliseconds()); //2ms

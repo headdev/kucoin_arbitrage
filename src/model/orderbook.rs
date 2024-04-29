@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 /// price as key, volume as value
-pub type PVMap = BTreeMap<OrderedFloat<f64>, OrderedFloat<f64>>; //Prices to Volume
+pub type Price = OrderedFloat<f64>;
+pub type Volume = OrderedFloat<f64>;
+pub type PVMap = BTreeMap<Price, Volume>; //Prices to Volume
 
 /// Internal printer struct
 struct PVMapDebug<'a>(&'a PVMap);
