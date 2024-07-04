@@ -811,6 +811,7 @@ dependencies = [
  "ordered-float",
  "serde",
  "serde_derive",
+ "serde_json",
  "tokio",
  "tokio-signal",
  "toml",
