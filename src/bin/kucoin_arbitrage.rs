@@ -2,7 +2,8 @@ use eyre::Result;
 use kucoin_api::client::{Kucoin, KucoinEnv};
 use kucoin_arbitrage::broker::gatekeeper::kucoin::task_gatekeep_chances;
 use kucoin_arbitrage::broker::order::kucoin::task_place_order;
-use kucoin_arbitrage::broker::orderbook::internal::task_sync_orderbook;
+use kucoin_arbitrage::broker::orderbook::internal::task_sync_orderbook as external_task_sync_orderbook;
+use kucoin_arbitrage::broker::orderbook::internal::SyncState;
 use kucoin_arbitrage::broker::symbol::filter::{symbol_with_quotes, vector_to_hash};
 use kucoin_arbitrage::broker::symbol::kucoin::{format_subscription_list, get_symbols};
 use kucoin_arbitrage::event::{
@@ -14,7 +15,7 @@ use kucoin_arbitrage::monitor::task::{task_log_mps as external_task_log_mps, tas
 use kucoin_arbitrage::strategy::all_taker_btc_usd::task_pub_chance_all_taker_btc_usd;
 use kucoin_arbitrage::system_event::task_signal_handle;
 use std::sync::Arc;
-use tokio::sync::broadcast::{channel, Receiver};
+use tokio::sync::broadcast::channel;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use serde_json::json;
@@ -22,12 +23,12 @@ use serde_derive::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
-use tokio::time::{sleep, Duration};
-use chrono::Utc;
+use tokio::time::{Duration, interval};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAKER_FEE: f64 = 0.001; // 0.1%
 const TAKER_FEE: f64 = 0.001; // 0.1%
-const MIN_PROFIT: f64 = 0.001; // 0.3%
+const MIN_PROFIT: f64 = 0.001; // 0.1%
 const MIN_INVESTMENT: f64 = 100.0;
 const MAX_INVESTMENT: f64 = 1000.0;
 const MAX_ROUTE_LENGTH: usize = 5; // Máximo número de pasos en una ruta
@@ -49,6 +50,8 @@ struct TradeStep {
     action: String,
     rate: f64,
 }
+
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -98,11 +101,23 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
     let full_orderbook = Arc::new(Mutex::new(FullOrderbook::new()));
     tracing::info!("Local empty full orderbook setup");
 
+    /*/let sync_state = Arc::new(SyncState {
+        symbols_synced: AtomicUsize::new(0),
+        total_symbols: symbol_infos.len(),
+    });*/
+
+    let sync_state = Arc::new(SyncState::new(symbol_infos.len()));
+
+    // ... (continúa en la siguiente parte)
+
+    //parte 4 
+
     let mut taskpool_infrastructure: JoinSet<Result<()>> = JoinSet::new();
-    taskpool_infrastructure.spawn(task_sync_orderbook(
+    taskpool_infrastructure.spawn(external_task_sync_orderbook(
         tx_orderbook.subscribe(),
         tx_orderbook_best.clone(),
         full_orderbook.clone(),
+        sync_state.clone(),
     ));
     taskpool_infrastructure.spawn(task_pub_chance_all_taker_btc_usd(
         tx_orderbook_best.subscribe(),
@@ -160,6 +175,8 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
         tracing::info!("{i:?}-th session of WS subscription setup");
     }
 
+    let mut interval = interval(Duration::from_secs(5));
+
     loop {
         tokio::select! {
             Some(res) = taskpool_infrastructure.join_next() => {
@@ -183,26 +200,27 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
                     break;
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                tracing::info!("Attempting to calculate arbitrage routes");
-                let orderbook_size = {
-                    let orderbook = full_orderbook.lock().await;
-                    orderbook.len()
-                };
-                tracing::info!("Current orderbook size: {}", orderbook_size);
-                
-                match calculate_arbitrage_routes(full_orderbook.clone()).await {
-                    Ok(arbitrage_routes) => {
-                        tracing::info!("Found {} arbitrage routes", arbitrage_routes.len());
-                        if !arbitrage_routes.is_empty() {
-                            if let Err(e) = save_routes_to_json(&arbitrage_routes) {
-                                tracing::error!("Failed to save routes to JSON: {:?}", e);
-                            } else {
-                                tracing::info!("Saved arbitrage routes to JSON");
+            _ = interval.tick() => {
+                if is_orderbook_ready(&sync_state) {
+                    tracing::info!("Orderbook is ready. Attempting to calculate arbitrage routes");
+                    match calculate_arbitrage_routes(full_orderbook.clone()).await {
+                        Ok(arbitrage_routes) => {
+                            tracing::info!("Found {} arbitrage routes", arbitrage_routes.len());
+                            if !arbitrage_routes.is_empty() {
+                                tracing::info!("Top route: {:?}", arbitrage_routes[0]);
+                                if let Err(e) = save_routes_to_json(&arbitrage_routes) {
+                                    tracing::error!("Failed to save routes to JSON: {:?}", e);
+                                } else {
+                                    tracing::info!("Saved arbitrage routes to JSON");
+                                }
                             }
                         }
+                        Err(e) => tracing::error!("Failed to calculate arbitrage routes: {:?}", e),
                     }
-                    Err(e) => tracing::error!("Failed to calculate arbitrage routes: {:?}", e),
+                } else {
+                    tracing::info!("Orderbook not ready. Synced {}/{} symbols", 
+                        sync_state.symbols_synced.load(Ordering::Relaxed),
+                        sync_state.total_symbols);
                 }
             }
         };
@@ -210,6 +228,10 @@ async fn core(config: kucoin_arbitrage::config::Config) -> Result<()> {
 
     tracing::info!("Exiting core function");
     Ok(())
+}
+
+fn is_orderbook_ready(sync_state: &SyncState) -> bool {
+    sync_state.symbols_synced.load(Ordering::Relaxed) >= sync_state.total_symbols
 }
 
 async fn calculate_arbitrage_routes(full_orderbook: Arc<Mutex<FullOrderbook>>) -> Result<Vec<ArbitrageRoute>> {
@@ -238,6 +260,9 @@ async fn calculate_arbitrage_routes(full_orderbook: Arc<Mutex<FullOrderbook>>) -
 
     routes.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
     tracing::info!("Found {} potential arbitrage routes", routes.len());
+    if !routes.is_empty() {
+        tracing::info!("Top route: {:?}", routes[0]);
+    }
     Ok(routes)
 }
 
